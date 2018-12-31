@@ -1,8 +1,9 @@
 Architecture: iphoneos-arm
-Name: PhotoRes
-Package: org.thebigboss.photores
+Name: PhotoRes+
+Package: com.spicat.photores
+Conflicts: org.thebigboss.photores
 Version: 1.0
-Author: PoomSmart
-Maintainer: PoomSmart
+Author: Spica T
+Maintainer: Spica T
 Depends: mobilesubstrate, preferenceloader, firmware (>= 6.0), ws.hbang.common (>= 1.2)
-Description: Taking photos at any size.
+Description: Taking photos at any sizes.

@@ -1,6 +1,8 @@
 #import "Common.h"
 #import "../PSPrefs.x"
 
+HBPreferences *preferences;
+
 BOOL tweakEnabled;
 BOOL specificSize;
 NSUInteger prWidth;
@@ -12,66 +14,31 @@ BOOL overrideRes;
 NSInteger overrideWidth;
 NSInteger overrideHeight;
 
-static void readAspectRatio(NSInteger index){
-    switch (index) {
-        case 1:
-            specificRatioSize = CGSizeMake(4, 3); // 1.33
-            break;
-        case 2:
-            specificRatioSize = CGSizeMake(16, 9); // 1.78
-            break;
-        case 3:
-            specificRatioSize = CGSizeMake(8, 5); // 1.6
-            break;
-        case 4:
-            specificRatioSize = CGSizeMake(7, 3); // 2.33
-            break;
-        case 5:
-            specificRatioSize = CGSizeMake(3, 2); // 1.5 (3.5-inches)
-            break;
-        case 6:
-            specificRatioSize = CGSizeMake(5, 3); // 1.67
-            break;
-        case 7:
-            specificRatioSize = CGSizeMake(5, 4); // 1.25
-            break;
-        case 8:
-            specificRatioSize = CGSizeMake(11, 8); // 1.375
-            break;
-        case 9:
-            specificRatioSize = CGSizeMake(1.618, 1);
-            break;
-        case 10:
-            specificRatioSize = CGSizeMake(1.85, 1);
-            break;
-        case 11:
-            specificRatioSize = CGSizeMake(2.39, 1);
-            break;
-        case 12:
-            specificRatioSize = CGSizeMake(1.775, 1); // 4-inches
-            break;
-        case 13:
-            specificRatioSize = CGSizeMake(1, 1);
-            break;
-    }
-}
+static CGFloat sizes[][2] = {
+    { 4, 3 }, // 1.33
+    { 16, 9 }, // 1.78
+    { 16, 10 }, // 1.6
+    { 7, 3 }, // 2.33
+    { 3, 2 }, // 1.5 (3.5-inches)
+    { 5, 3 }, // 1.67
+    { 5, 4 }, // 1.25
+    { 11, 8 }, // 1.375
+    { 1.618, 1 },
+    { 1.85, 1 },
+    { 2.39, 1 },
+    { 1.775, 1 }, // 4-inches
+    { 1, 1 }
+};
 
-HaveCallback(){
-    GetPrefs()
-    GetBool(tweakEnabled, tweakKey, YES)
-    GetBool(specificSize, specificSizeKey, NO)
-    GetInt(prWidth, widthKey, 0)
-    GetInt(prHeight, heightKey, 0)
-    GetInt(ratioIndex, ratioIndexKey, 0)
-    readAspectRatio(ratioIndex);
+static void readAspectRatio(NSInteger index) {
+    specificRatioSize = CGSizeMake(sizes[index - 1][0], sizes[index - 1][1]);
 }
 
 %group iOS10
 
 %hook AVCapturePhotoOutput
 
-- (FigCaptureIrisStillImageSettings *)_figCaptureIrisStillImageSettingsForAVCapturePhotoSettings: (FigCaptureStillImageSettings *)s delegate: (id)delegate connections: (NSArray *)connections
-{
+- (FigCaptureIrisStillImageSettings *)_figCaptureIrisStillImageSettingsForAVCapturePhotoSettings:(FigCaptureStillImageSettings *)s delegate:(id)delegate connections:(NSArray *)connections {
     BOOL square = [[self _sanitizedSettingsForSettings:s] isSquareCropEnabled];
     if (!square) {
         AVCaptureDeviceFormat *format = [(AVCaptureConnection *) connections[0] sourceDevice].activeFormat;
@@ -102,8 +69,7 @@ HaveCallback(){
 
 %hook FigCaptureIrisStillImageSettings
 
-- (void)setOutputWidth: (NSInteger)width
-{
+- (void)setOutputWidth:(NSInteger)width {
     %orig(overrideRes ? overrideWidth : width);
 }
 
@@ -113,14 +79,42 @@ HaveCallback(){
 
 %end
 
-%end
+%hook CAMViewfinderViewController
 
-%group iOS9
+%property(retain, nonatomic) UILongPressGestureRecognizer *prGesture;
+
+- (void)_createFlipButtonIfNecessary {
+    %orig;
+    if (self.prGesture == nil) {
+        self.prGesture = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(pr_displayDialog:)];
+        [[self valueForKey:@"__flipButton"] addGestureRecognizer:self.prGesture];
+    }
+}
+
+%new
+- (void)pr_displayDialog:(UILongPressGestureRecognizer *)gesture {
+    if (gesture.state == UIGestureRecognizerStateEnded) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"PhotoRes+" message:@"Select ratio" preferredStyle:UIAlertControllerStyleAlert];
+        for (NSInteger i = 0; i < 13; ++i) {
+            if (ratioIndex == i + 1)
+                continue;
+            UIAlertAction *action = [UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%g:%g", sizes[i][0], sizes[i][1]] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                readAspectRatio(ratioIndex = i + 1);
+                [preferences setInteger:ratioIndex forKey:ratioIndexKey];
+            }];
+            [alert addAction:action];
+        }
+        UIAlertAction *defaultAction = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil];
+	    [alert addAction:defaultAction];
+        [self presentViewController:alert animated:YES completion:nil];
+    }
+}
+
+%end
 
 %hook AVCaptureIrisStillImageOutput
 
-- (FigCaptureIrisStillImageSettings *)_figCaptureIrisStillImageSettingsForAVCaptureIrisStillImageSettings: (FigCaptureStillImageSettings *)s connections: (NSArray *)connections
-{
+- (FigCaptureIrisStillImageSettings *)_figCaptureIrisStillImageSettingsForAVCaptureIrisStillImageSettings:(FigCaptureStillImageSettings *)s connections:(NSArray *)connections {
     BOOL square = [self _sanitizedSettingsForSettings:s].squareCropEnabled;
     if (!square) {
         AVCaptureDeviceFormat *format = [(AVCaptureConnection *) connections[0] sourceDevice].activeFormat;
@@ -152,8 +146,7 @@ HaveCallback(){
 
 %hook AVCaptureStillImageOutput
 
-- (FigCaptureStillImageSettings *)_figCaptureStillImageSettingsForConnection: (AVCaptureConnection *)connection
-{
+- (FigCaptureStillImageSettings *)_figCaptureStillImageSettingsForConnection:(AVCaptureConnection *)connection {
     BOOL square = self.squareCropEnabled;
     if (!square) {
         AVCaptureDeviceFormat *format = [connection sourceDevice].activeFormat;
@@ -180,8 +173,7 @@ HaveCallback(){
 
 %hook FigCaptureStillImageSettings
 
-- (void)setOutputWidth: (NSInteger)width
-{
+- (void)setOutputWidth:(NSInteger)width {
     %orig(overrideRes ? overrideWidth : width);
 }
 
@@ -196,7 +188,7 @@ HaveCallback(){
 BOOL overridePreviewSize;
 CGSize prPreviewSize = CGSizeZero;
 
-NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig){
+NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
     NSString *prefix = orig[@"OverridePrefixes"];
     if ([prefix isEqualToString:@"P:"]) {
         NSUInteger width = [[orig valueForKeyPath:@"LiveSourceOptions.Capture.Width"] integerValue];
@@ -221,8 +213,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig){
 
 %hook AVCaptureSession
 
-+ (NSMutableDictionary *)_createCaptureOptionsForPreset: (id)preset audioDevice: (id)audio videoDevice: (id)video errorStatus: (int *)error
-{
++ (NSMutableDictionary *)_createCaptureOptionsForPreset:(id)preset audioDevice:(id)audio videoDevice:(id)video errorStatus:(int *)error {
     return hookCaptureOptions(%orig);
 }
 
@@ -234,8 +225,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig){
 
 %hook AVCaptureStillImageOutput
 
-- (void)configureAndInitiateCopyStillImageForRequest: (AVCaptureStillImageRequest *)request
-{
+- (void)configureAndInitiateCopyStillImageForRequest:(AVCaptureStillImageRequest *)request {
     if ([self respondsToSelector:@selector(squareCropEnabled)])
         overrideRes = !self.squareCropEnabled;
     else
@@ -268,12 +258,11 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig){
 
 %end
 
-%group iOS7
+%group iOS7Up
 
 %hook PLAssetFormats
 
-+ (CGSize)scaledSizeForSize: (CGSize)size format: (NSInteger)format capLength: (BOOL)capLength
-{
++ (CGSize)scaledSizeForSize:(CGSize)size format:(NSInteger)format capLength:(BOOL)capLength {
     if (overridePreviewSize && !CGSizeEqualToSize(prPreviewSize, CGSizeZero))
         size = prPreviewSize;
     return %orig(size, format, capLength);
@@ -287,8 +276,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig){
 
 %hook AVCaptureSession
 
-- (NSMutableDictionary *)_createCaptureOptionsForPreset: (id)preset audioDevice: (id)audio videoDevice: (id)video errorStatus: (int *)error
-{
+- (NSMutableDictionary *)_createCaptureOptionsForPreset:(id)preset audioDevice:(id)audio videoDevice:(id)video errorStatus:(int *)error {
     return hookCaptureOptions(%orig);
 }
 
@@ -296,8 +284,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig){
 
 %hook PLAssetFormats
 
-+ (CGSize)sizeForFormat: (NSInteger)format
-{
++ (CGSize)sizeForFormat:(NSInteger)format {
     if (overridePreviewSize && !CGSizeEqualToSize(prPreviewSize, CGSizeZero)) {
         // kill a check from /System/Library/Lockdown/Checkpoint.xml !
         CGSize correctPreviewSize = CGSizeMake(0.5 * prPreviewSize.width, 0.5 * prPreviewSize.height);
@@ -310,9 +297,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig){
 
 %hook PLCameraView
 
-- (void)_preparePreviewWellImage: (UIImage *)image isVideo: (BOOL)isVideo
-{
-    %log;
+- (void)_preparePreviewWellImage:(UIImage *)image isVideo:(BOOL)isVideo {
     overridePreviewSize = !isVideo;
     %orig;
     overridePreviewSize = NO;
@@ -326,8 +311,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig){
 
 %hook PLCameraController
 
-- (void)_processCapturedPhotoWithDictionary: (id)dictionary error: (id)error HDRUsed: (BOOL)hdr
-{
+- (void)_processCapturedPhotoWithDictionary:(id)dictionary error:(id)error HDRUsed:(BOOL)hdr {
     overridePreviewSize = YES;
     %orig;
     overridePreviewSize = NO;
@@ -341,8 +325,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig){
 
 %hook PLCameraController
 
-- (void)_processCapturedPhotoWithDictionary: (id)dictionary error: (id)error
-{
+- (void)_processCapturedPhotoWithDictionary:(id)dictionary error:(id)error {
     overridePreviewSize = YES;
     %orig;
     overridePreviewSize = NO;
@@ -352,38 +335,39 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig){
 
 %end
 
-%ctor
-{
+%ctor {
     if (IN_SPRINGBOARD && isiOS7Up)
         return;
-    HaveObserver()
-    callback();
-    if (tweakEnabled) {
-        if (isiOS8Up) {
-            if (isiOS9Up) {
-                if (isiOS10Up) {
-                    %init(iOS10);
-                }
-                %init(iOS9Up);
-                %init(iOS9);
+    preferences = [[HBPreferences alloc] initWithIdentifier:tweakIdentifier];
+    [preferences registerBool:&tweakEnabled default:YES forKey:tweakKey];
+    [preferences registerBool:&specificSize default:NO forKey:specificSizeKey];
+    [preferences registerUnsignedInteger:&prWidth default:0 forKey:widthKey];
+    [preferences registerUnsignedInteger:&prHeight default:0 forKey:heightKey];
+    [preferences registerInteger:&ratioIndex default:0 forKey:ratioIndexKey];
+    readAspectRatio(ratioIndex);
+    if (isiOS8Up) {
+        if (isiOS9Up) {
+            if (isiOS10Up) {
+                %init(iOS10);
+            }
+            %init(iOS9Up);
+        } else {
+            %init(iOS8);
+        }
+    } else {
+        %init(preiOS8);
+        if (isiOS7Up) {
+            %init(iOS7Up);
+            if (isiOS71Up) {
+                %init(iOS71);
             } else {
-                %init(iOS8);
+                %init(preiOS71);
             }
         } else {
-            %init(preiOS8);
-            if (isiOS7Up) {
-                %init(iOS7);
-                if (isiOS71Up) {
-                    %init(iOS71);
-                } else {
-                    %init(preiOS71);
-                }
-            } else {
-                %init(preiOS7);
-            }
+            %init(preiOS7);
         }
-        if (isiOS78) {
-            %init(iOS78);
-        }
+    }
+    if (isiOS78) {
+        %init(iOS78);
     }
 }
