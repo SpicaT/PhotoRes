@@ -1,14 +1,13 @@
 #import "Common.h"
-#import "../PSPrefs.x"
 
 HBPreferences *preferences;
 
-BOOL tweakEnabled;
-BOOL specificSize;
-NSUInteger prWidth;
-NSUInteger prHeight;
-NSInteger ratioIndex;
-CGSize specificRatioSize;
+BOOL tweakEnabled = YES;
+BOOL specificSize = NO;
+NSUInteger prWidth = 0;
+NSUInteger prHeight = 0;
+NSInteger ratioIndex = 0;
+static CGSize specificRatioSize = CGSizeZero;
 
 BOOL overrideRes;
 NSInteger overrideWidth;
@@ -31,7 +30,8 @@ static CGFloat sizes[][2] = {
 };
 
 static void readAspectRatio(NSInteger index) {
-    specificRatioSize = CGSizeMake(sizes[index - 1][0], sizes[index - 1][1]);
+    specificRatioSize.width = sizes[index - 1][0];
+    specificRatioSize.height = sizes[index - 1][1];
 }
 
 %group iOS10
@@ -39,9 +39,10 @@ static void readAspectRatio(NSInteger index) {
 %hook AVCapturePhotoOutput
 
 - (FigCaptureIrisStillImageSettings *)_figCaptureIrisStillImageSettingsForAVCapturePhotoSettings:(FigCaptureStillImageSettings *)s delegate:(id)delegate connections:(NSArray *)connections {
+    if (!tweakEnabled) return %orig;
     BOOL square = [[self _sanitizedSettingsForSettings:s] isSquareCropEnabled];
     if (!square) {
-        AVCaptureDeviceFormat *format = [(AVCaptureConnection *) connections[0] sourceDevice].activeFormat;
+        AVCaptureDeviceFormat *format = [(AVCaptureConnection *)connections[0] sourceDevice].activeFormat;
         CMVideoDimensions res = CMVideoFormatDescriptionGetDimensions(format.formatDescription);
         NSUInteger width = res.width;
         NSUInteger height = res.height;
@@ -85,7 +86,7 @@ static void readAspectRatio(NSInteger index) {
 
 - (void)_createFlipButtonIfNecessary {
     %orig;
-    if (self.prGesture == nil) {
+    if (tweakEnabled && self.prGesture == nil) {
         self.prGesture = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(pr_displayDialog:)];
         [[self valueForKey:@"__flipButton"] addGestureRecognizer:self.prGesture];
     }
@@ -93,7 +94,7 @@ static void readAspectRatio(NSInteger index) {
 
 %new
 - (void)pr_displayDialog:(UILongPressGestureRecognizer *)gesture {
-    if (gesture.state == UIGestureRecognizerStateEnded) {
+    if (tweakEnabled && gesture.state == UIGestureRecognizerStateEnded) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"PhotoRes+" message:@"Select ratio" preferredStyle:UIAlertControllerStyleAlert];
         for (NSInteger i = 0; i < 13; ++i) {
             if (ratioIndex == i + 1)
@@ -115,6 +116,7 @@ static void readAspectRatio(NSInteger index) {
 %hook AVCaptureIrisStillImageOutput
 
 - (FigCaptureIrisStillImageSettings *)_figCaptureIrisStillImageSettingsForAVCaptureIrisStillImageSettings:(FigCaptureStillImageSettings *)s connections:(NSArray *)connections {
+    if (!tweakEnabled) return %orig;
     BOOL square = [self _sanitizedSettingsForSettings:s].squareCropEnabled;
     if (!square) {
         AVCaptureDeviceFormat *format = [(AVCaptureConnection *) connections[0] sourceDevice].activeFormat;
@@ -147,6 +149,7 @@ static void readAspectRatio(NSInteger index) {
 %hook AVCaptureStillImageOutput
 
 - (FigCaptureStillImageSettings *)_figCaptureStillImageSettingsForConnection:(AVCaptureConnection *)connection {
+    if (!tweakEnabled) return %orig;
     BOOL square = self.squareCropEnabled;
     if (!square) {
         AVCaptureDeviceFormat *format = [connection sourceDevice].activeFormat;
@@ -214,7 +217,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
 %hook AVCaptureSession
 
 + (NSMutableDictionary *)_createCaptureOptionsForPreset:(id)preset audioDevice:(id)audio videoDevice:(id)video errorStatus:(int *)error {
-    return hookCaptureOptions(%orig);
+    return tweakEnabled ? hookCaptureOptions(%orig) : %orig;
 }
 
 %end
@@ -226,6 +229,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
 %hook AVCaptureStillImageOutput
 
 - (void)configureAndInitiateCopyStillImageForRequest:(AVCaptureStillImageRequest *)request {
+    if (!tweakEnabled) { %orig; return; }
     if ([self respondsToSelector:@selector(squareCropEnabled)])
         overrideRes = !self.squareCropEnabled;
     else
@@ -263,7 +267,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
 %hook PLAssetFormats
 
 + (CGSize)scaledSizeForSize:(CGSize)size format:(NSInteger)format capLength:(BOOL)capLength {
-    if (overridePreviewSize && !CGSizeEqualToSize(prPreviewSize, CGSizeZero))
+    if (tweakEnabled && overridePreviewSize && !CGSizeEqualToSize(prPreviewSize, CGSizeZero))
         size = prPreviewSize;
     return %orig(size, format, capLength);
 }
@@ -277,7 +281,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
 %hook AVCaptureSession
 
 - (NSMutableDictionary *)_createCaptureOptionsForPreset:(id)preset audioDevice:(id)audio videoDevice:(id)video errorStatus:(int *)error {
-    return hookCaptureOptions(%orig);
+    return tweakEnabled ? hookCaptureOptions(%orig) : %orig;
 }
 
 %end
@@ -285,7 +289,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
 %hook PLAssetFormats
 
 + (CGSize)sizeForFormat:(NSInteger)format {
-    if (overridePreviewSize && !CGSizeEqualToSize(prPreviewSize, CGSizeZero)) {
+    if (tweakEnabled && overridePreviewSize && !CGSizeEqualToSize(prPreviewSize, CGSizeZero)) {
         // kill a check from /System/Library/Lockdown/Checkpoint.xml !
         CGSize correctPreviewSize = CGSizeMake(0.5 * prPreviewSize.width, 0.5 * prPreviewSize.height);
         return correctPreviewSize;
@@ -298,7 +302,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
 %hook PLCameraView
 
 - (void)_preparePreviewWellImage:(UIImage *)image isVideo:(BOOL)isVideo {
-    overridePreviewSize = !isVideo;
+    overridePreviewSize = tweakEnabled && !isVideo;
     %orig;
     overridePreviewSize = NO;
 }
@@ -312,7 +316,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
 %hook PLCameraController
 
 - (void)_processCapturedPhotoWithDictionary:(id)dictionary error:(id)error HDRUsed:(BOOL)hdr {
-    overridePreviewSize = YES;
+    overridePreviewSize = tweakEnabled;
     %orig;
     overridePreviewSize = NO;
 }
@@ -326,7 +330,7 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
 %hook PLCameraController
 
 - (void)_processCapturedPhotoWithDictionary:(id)dictionary error:(id)error {
-    overridePreviewSize = YES;
+    overridePreviewSize = tweakEnabled;
     %orig;
     overridePreviewSize = NO;
 }
@@ -344,6 +348,9 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
     [preferences registerUnsignedInteger:&prWidth default:0 forKey:widthKey];
     [preferences registerUnsignedInteger:&prHeight default:0 forKey:heightKey];
     [preferences registerInteger:&ratioIndex default:0 forKey:ratioIndexKey];
+    [preferences registerPreferenceChangeBlock:^void (NSString *key, id value) {
+        readAspectRatio([value integerValue]);
+    } forKey:ratioIndexKey];
     readAspectRatio(ratioIndex);
     if (isiOS8Up) {
         if (isiOS9Up) {
@@ -370,4 +377,8 @@ NSMutableDictionary *hookCaptureOptions(NSMutableDictionary *orig) {
     if (isiOS78) {
         %init(iOS78);
     }
+}
+
+%dtor {
+    [preferences release];
 }

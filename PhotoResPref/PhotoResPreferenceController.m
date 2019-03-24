@@ -1,10 +1,10 @@
-#define UIFUNCTIONS_NOT_C
 #import <UIKit/UIKit.h>
+#import <Preferences/PSSpecifier.h>
 #import <CepheiPrefs/HBListController.h>
 #import <CepheiPrefs/HBAppearanceSettings.h>
 #import <substrate.h>
-#import "Common.h"
-#import "../PSPrefs.x"
+#import "../Common.h"
+#import "../../PSPrefs/PSPrefs.x"
 #import <dlfcn.h>
 
 @interface PhotoResPreferenceController : HBListController {
